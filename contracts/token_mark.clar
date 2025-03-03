@@ -7,6 +7,8 @@
 (define-constant err-token-exists (err u101))
 (define-constant err-token-not-found (err u102))
 (define-constant err-invalid-price (err u103))
+(define-constant err-unauthorized (err u104))
+(define-constant err-zero-price (err u105))
 
 ;; Data structures
 (define-map tokens 
@@ -24,26 +26,37 @@
   { price: uint }
 )
 
+;; Private functions
+(define-private (is-authorized (token-id (string-ascii 32)))
+  (let ((token (unwrap! (map-get? tokens { token-id: token-id }) false)))
+    (or (is-eq tx-sender contract-owner)
+        (is-eq tx-sender (get issuer token)))
+  )
+)
+
 ;; Public functions
 (define-public (add-token (token-id (string-ascii 32)) (issuer principal) (initial-price uint))
   (if (is-eq tx-sender contract-owner)
     (if (map-get? tokens { token-id: token-id })
       err-token-exists
-      (begin
-        (map-set tokens 
-          { token-id: token-id }
-          {
-            issuer: issuer,
-            current-price: initial-price,
-            initial-price: initial-price,
-            timestamp: block-height
-          }
+      (if (> initial-price u0)
+        (begin
+          (map-set tokens 
+            { token-id: token-id }
+            {
+              issuer: issuer,
+              current-price: initial-price,
+              initial-price: initial-price,
+              timestamp: block-height
+            }
+          )
+          (map-set price-history
+            { token-id: token-id, timestamp: block-height }
+            { price: initial-price }
+          )
+          (ok true)
         )
-        (map-set price-history
-          { token-id: token-id, timestamp: block-height }
-          { price: initial-price }
-        )
-        (ok true)
+        err-zero-price
       )
     )
     err-owner-only
@@ -53,16 +66,22 @@
 (define-public (update-price (token-id (string-ascii 32)) (new-price uint))
   (let ((token (map-get? tokens { token-id: token-id })))
     (if token
-      (begin
-        (map-set tokens
-          { token-id: token-id }
-          (merge token { current-price: new-price, timestamp: block-height })
+      (if (is-authorized token-id)
+        (if (> new-price u0)
+          (begin
+            (map-set tokens
+              { token-id: token-id }
+              (merge token { current-price: new-price, timestamp: block-height })
+            )
+            (map-set price-history
+              { token-id: token-id, timestamp: block-height }
+              { price: new-price }
+            )
+            (ok true)
+          )
+          err-zero-price
         )
-        (map-set price-history
-          { token-id: token-id, timestamp: block-height }
-          { price: new-price }
-        )
-        (ok true)
+        err-unauthorized
       )
       err-token-not-found
     )
@@ -77,11 +96,17 @@
 (define-read-only (get-performance (token-id (string-ascii 32)))
   (let ((token (map-get? tokens { token-id: token-id })))
     (if token
-      (ok {
-        initial-price: (get initial-price token),
-        current-price: (get current-price token),
-        return: (- (get current-price token) (get initial-price token))
-      })
+      (let (
+        (initial (get initial-price token))
+        (current (get current-price token))
+      )
+        (ok {
+          initial-price: initial,
+          current-price: current,
+          absolute-return: (- current initial),
+          percentage-return: (/ (* (- current initial) u100) initial)
+        })
+      )
       err-token-not-found
     )
   )

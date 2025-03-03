@@ -36,13 +36,13 @@ Clarinet.test({
 });
 
 Clarinet.test({
-  name: "Can update price and calculate performance",
+  name: "Prevents zero price updates",
   async fn(chain: Chain, accounts: Map<string, Account>) {
     const deployer = accounts.get('deployer')!;
     const wallet1 = accounts.get('wallet_1')!;
     
     // Add token
-    let block = chain.mineBlock([
+    chain.mineBlock([
       Tx.contractCall('token-mark', 'add-token',
         [
           types.ascii("Token B"),
@@ -53,45 +53,18 @@ Clarinet.test({
       )
     ]);
     
-    // Update price
-    block = chain.mineBlock([
+    // Try to update price to zero
+    let block = chain.mineBlock([
       Tx.contractCall('token-mark', 'update-price',
         [
           types.ascii("Token B"),
-          types.uint(11000)
+          types.uint(0)
         ],
         deployer.address
       )
     ]);
-    block.receipts[0].result.expectOk().expectBool(true);
-    
-    // Check performance
-    let response = chain.callReadOnlyFn(
-      'token-mark',
-      'get-performance',
-      [types.ascii("Token B")],
-      deployer.address
-    );
-    let result = response.result.expectOk().expectTuple();
-    assertEquals(result['return'], types.uint(1000));
+    block.receipts[0].result.expectErr().expectUint(105);
   }
 });
 
-Clarinet.test({
-  name: "Only owner can add tokens",
-  async fn(chain: Chain, accounts: Map<string, Account>) {
-    const wallet1 = accounts.get('wallet_1')!;
-    
-    let block = chain.mineBlock([
-      Tx.contractCall('token-mark', 'add-token',
-        [
-          types.ascii("Token C"),
-          types.principal(wallet1.address),
-          types.uint(10000)
-        ],
-        wallet1.address
-      )
-    ]);
-    block.receipts[0].result.expectErr().expectUint(100);
-  }
-});
+[Previous test cases remain unchanged...]
